@@ -12,6 +12,7 @@ namespace TranslationByLocalAI
         internal const uint KEYEVENTF_KEYUP = 0x0002;
         internal const ushort VK_CONTROL = 0x11;
         internal const ushort VK_C = 0x43;
+        internal const uint CF_UNICODETEXT = 13;
 
         internal delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -97,8 +98,7 @@ namespace TranslationByLocalAI
         internal static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool SetForegroundWindow(IntPtr window);
+        internal static extern IntPtr WindowFromPoint(POINT point);
 
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -108,6 +108,31 @@ namespace TranslationByLocalAI
 
         [DllImport("user32.dll")]
         internal static extern uint GetClipboardSequenceNumber();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool OpenClipboard(IntPtr owner);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CloseClipboard();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool IsClipboardFormatAvailable(uint format);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern IntPtr GetClipboardData(uint format);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern IntPtr GlobalLock(IntPtr memory);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GlobalUnlock(IntPtr memory);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern UIntPtr GlobalSize(IntPtr memory);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

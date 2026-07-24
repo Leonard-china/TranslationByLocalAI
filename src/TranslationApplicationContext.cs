@@ -19,7 +19,6 @@ namespace TranslationByLocalAI
         private readonly CancellationTokenSource _lifetimeCancellation;
         private AppConfig _config;
         private TranslationForm _translationForm;
-        private string _selectedText;
         private Point _selectedPoint;
         private bool _disposed;
 
@@ -77,12 +76,10 @@ namespace TranslationByLocalAI
             _trayIcon.Visible = true;
             _trayIcon.DoubleClick += delegate { ShowSettings(); };
 
-            _selectionMonitor = new SelectionMonitor(
-                _floatingButton,
-                _floatingButton,
-                _desktopWidget);
+            _selectionMonitor = new SelectionMonitor(_floatingButton);
             _selectionMonitor.Enabled = _config.Enabled;
-            _selectionMonitor.TextSelected += SelectionMonitorTextSelected;
+            _selectionMonitor.SelectionDetected += SelectionMonitorSelectionDetected;
+            _selectionMonitor.SelectionCanceled += SelectionMonitorSelectionCanceled;
             _floatingButton.TranslateRequested += FloatingButtonTranslateRequested;
             _desktopWidget.ManualTranslationRequested += DesktopWidgetManualTranslationRequested;
             _desktopWidget.WidgetMoved += DesktopWidgetMoved;
@@ -186,25 +183,40 @@ namespace TranslationByLocalAI
             }
         }
 
-        private void SelectionMonitorTextSelected(object sender, TextSelectedEventArgs e)
+        private void SelectionMonitorSelectionDetected(
+            object sender,
+            SelectionDetectedEventArgs e)
         {
-            _selectedText = e.Text;
             _selectedPoint = e.CursorPosition;
             AppLogger.Write("Showing floating button.");
             _floatingButton.ShowNear(e.CursorPosition, _config.ButtonTimeoutSeconds);
         }
 
-        private void FloatingButtonTranslateRequested(object sender, EventArgs e)
+        private void SelectionMonitorSelectionCanceled(object sender, EventArgs e)
         {
             _floatingButton.Hide();
-            if (string.IsNullOrWhiteSpace(_selectedText))
+        }
+
+        private async void FloatingButtonTranslateRequested(object sender, EventArgs e)
+        {
+            _floatingButton.Hide();
+            var selectedText = await _selectionMonitor.CaptureSelectionAsync();
+            if (_disposed || string.IsNullOrWhiteSpace(selectedText))
             {
+                if (!_disposed)
+                {
+                    _trayIcon.ShowBalloonTip(
+                        1800,
+                        "未读取到选中文字",
+                        "请重新划选文字后再点击翻译按钮。",
+                        ToolTipIcon.Info);
+                }
                 return;
             }
 
             AppLogger.Write("Translation window requested.");
             EnsureTranslationForm();
-            _translationForm.ShowTranslation(_selectedText, _selectedPoint);
+            _translationForm.ShowTranslation(selectedText, _selectedPoint);
         }
 
         private void DesktopWidgetManualTranslationRequested(object sender, EventArgs e)
