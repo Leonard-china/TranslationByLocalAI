@@ -10,7 +10,6 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 }
 
 $outputDirectory = Join-Path $projectRoot "dist"
-$wpfDirectory = Join-Path (Split-Path -Parent $compiler) "WPF"
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 $outputFile = Join-Path $outputDirectory "TranslationByLocalAI.exe"
 $sourceFiles = Get-ChildItem -LiteralPath (Join-Path $projectRoot "src") -Filter "*.cs" |
@@ -29,10 +28,7 @@ $compilerArguments = @(
     "/reference:System.Drawing.dll",
     "/reference:System.Net.Http.dll",
     "/reference:System.Web.Extensions.dll",
-    "/reference:System.Windows.Forms.dll",
-    "/reference:$(Join-Path $wpfDirectory 'UIAutomationClient.dll')",
-    "/reference:$(Join-Path $wpfDirectory 'UIAutomationTypes.dll')",
-    "/reference:$(Join-Path $wpfDirectory 'WindowsBase.dll')"
+    "/reference:System.Windows.Forms.dll"
 ) + $sourceFiles
 
 & $compiler $compilerArguments

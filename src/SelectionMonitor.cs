@@ -3,55 +3,63 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Windows.Automation;
 
 namespace TranslationByLocalAI
 {
-    internal sealed class TextSelectedEventArgs : EventArgs
+    internal sealed class SelectionDetectedEventArgs : EventArgs
     {
-        internal TextSelectedEventArgs(string text, Point cursorPosition)
+        internal SelectionDetectedEventArgs(Point cursorPosition)
         {
-            Text = text;
             CursorPosition = cursorPosition;
         }
 
-        internal string Text { get; private set; }
         internal Point CursorPosition { get; private set; }
     }
 
     internal sealed class SelectionMonitor : IDisposable
     {
+        private const int ClipboardTimeoutMilliseconds = 500;
+        private const int MaximumSelectionLength = 12000;
+
         private readonly Control _dispatcher;
-        private readonly FloatingButtonForm _button;
-        private readonly DesktopWidgetForm _desktopWidget;
         private readonly NativeMethods.LowLevelMouseProc _mouseProc;
-        private readonly System.Windows.Forms.Timer _captureTimer;
+        private readonly System.Windows.Forms.Timer _selectionTimer;
+        private readonly uint _processId;
+        private readonly int _dragThresholdX;
+        private readonly int _dragThresholdY;
+        private readonly int _doubleClickTime;
+        private readonly int _doubleClickWidth;
+        private readonly int _doubleClickHeight;
         private IntPtr _hook;
         private Point _mouseDownPoint;
-        private Point _mouseUpPoint;
-        private IntPtr _sourceWindow;
         private int _lastClickTick;
         private Point _lastClickPoint;
+        private bool _trackingExternalClick;
+        private IntPtr _selectionSourceWindow;
+        private Point _selectionPoint;
+        private int _selectionGeneration;
         private int _captureGeneration;
-        private bool _clickingButton;
         private bool _disposed;
 
-        internal event EventHandler<TextSelectedEventArgs> TextSelected;
+        internal event EventHandler<SelectionDetectedEventArgs> SelectionDetected;
+        internal event EventHandler SelectionCanceled;
         internal bool Enabled { get; set; }
 
-        internal SelectionMonitor(
-            Control dispatcher,
-            FloatingButtonForm button,
-            DesktopWidgetForm desktopWidget)
+        internal SelectionMonitor(Control dispatcher)
         {
             _dispatcher = dispatcher;
-            _button = button;
-            _desktopWidget = desktopWidget;
             _mouseProc = MouseHookCallback;
-            _captureTimer = new System.Windows.Forms.Timer();
-            _captureTimer.Interval = 110;
-            _captureTimer.Tick += CaptureTimerTick;
+            _processId = (uint)Process.GetCurrentProcess().Id;
+            _dragThresholdX = Math.Max(3, SystemInformation.DragSize.Width / 2);
+            _dragThresholdY = Math.Max(3, SystemInformation.DragSize.Height / 2);
+            _doubleClickTime = SystemInformation.DoubleClickTime;
+            _doubleClickWidth = SystemInformation.DoubleClickSize.Width;
+            _doubleClickHeight = SystemInformation.DoubleClickSize.Height;
+            _selectionTimer = new System.Windows.Forms.Timer();
+            _selectionTimer.Interval = 110;
+            _selectionTimer.Tick += SelectionTimerTick;
             Enabled = true;
         }
 
@@ -79,80 +87,103 @@ namespace TranslationByLocalAI
 
         private IntPtr MouseHookCallback(int code, IntPtr wParam, IntPtr lParam)
         {
-            if (code >= 0 && Enabled)
+            try
             {
-                var data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(
-                    lParam,
-                    typeof(NativeMethods.MSLLHOOKSTRUCT));
-                var point = new Point(data.Point.X, data.Point.Y);
-                var message = wParam.ToInt32();
-
-                if (message == NativeMethods.WM_LBUTTONDOWN)
+                if (code >= 0 && Enabled)
                 {
-                    if (_desktopWidget.Visible && _desktopWidget.Bounds.Contains(point))
-                    {
-                        _clickingButton = true;
-                        return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
-                    }
-                    if (_button.Visible)
-                    {
-                        if (_button.Bounds.Contains(point))
-                        {
-                            _clickingButton = true;
-                            return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
-                        }
-                        _button.Hide();
-                    }
-                    _clickingButton = false;
-                    _mouseDownPoint = point;
-                    _sourceWindow = NativeMethods.GetForegroundWindow();
-                }
-                else if (message == NativeMethods.WM_LBUTTONUP)
-                {
-                    if (_clickingButton)
-                    {
-                        _clickingButton = false;
-                        return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
-                    }
+                    var data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(
+                        lParam,
+                        typeof(NativeMethods.MSLLHOOKSTRUCT));
+                    var point = new Point(data.Point.X, data.Point.Y);
+                    var message = wParam.ToInt32();
 
-                    _mouseUpPoint = point;
-                    var now = Environment.TickCount;
-                    var isDrag = Math.Abs(point.X - _mouseDownPoint.X) >= Math.Max(3, SystemInformation.DragSize.Width / 2)
-                        || Math.Abs(point.Y - _mouseDownPoint.Y) >= Math.Max(3, SystemInformation.DragSize.Height / 2);
-                    var elapsed = unchecked(now - _lastClickTick);
-                    var isDoubleClick = elapsed >= 0
-                        && elapsed <= SystemInformation.DoubleClickTime
-                        && Math.Abs(point.X - _lastClickPoint.X) <= SystemInformation.DoubleClickSize.Width
-                        && Math.Abs(point.Y - _lastClickPoint.Y) <= SystemInformation.DoubleClickSize.Height;
-
-                    _lastClickTick = now;
-                    _lastClickPoint = point;
-
-                    if ((isDrag || isDoubleClick) && !IsOwnWindow(_sourceWindow))
+                    if (message == NativeMethods.WM_LBUTTONDOWN)
                     {
-                        AppLogger.Write(isDrag ? "Mouse drag detected." : "Mouse double-click detected.");
-                        ScheduleCapture();
+                        HandleLeftButtonDown(data.Point, point);
+                    }
+                    else if (message == NativeMethods.WM_LBUTTONUP)
+                    {
+                        HandleLeftButtonUp(point);
                     }
                 }
+            }
+            catch
+            {
+                // A global hook must always return immediately. Diagnostics,
+                // clipboard access and UI work are deliberately kept elsewhere.
             }
 
             return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
         }
 
-        private void ScheduleCapture()
+        private void HandleLeftButtonDown(NativeMethods.POINT nativePoint, Point point)
+        {
+            var clickedWindow = NativeMethods.WindowFromPoint(nativePoint);
+            if (IsOwnWindow(clickedWindow))
+            {
+                _trackingExternalClick = false;
+                return;
+            }
+
+            _trackingExternalClick = true;
+            _mouseDownPoint = point;
+            Interlocked.Increment(ref _captureGeneration);
+            ScheduleSelectionCanceled();
+        }
+
+        private void HandleLeftButtonUp(Point point)
+        {
+            if (!_trackingExternalClick)
+            {
+                return;
+            }
+            _trackingExternalClick = false;
+
+            var now = Environment.TickCount;
+            var isDrag = Math.Abs(point.X - _mouseDownPoint.X) >= _dragThresholdX
+                || Math.Abs(point.Y - _mouseDownPoint.Y) >= _dragThresholdY;
+            var elapsed = unchecked(now - _lastClickTick);
+            var isDoubleClick = elapsed >= 0
+                && elapsed <= _doubleClickTime
+                && Math.Abs(point.X - _lastClickPoint.X) <= _doubleClickWidth
+                && Math.Abs(point.Y - _lastClickPoint.Y) <= _doubleClickHeight;
+
+            _lastClickTick = now;
+            _lastClickPoint = point;
+            if (!isDrag && !isDoubleClick)
+            {
+                return;
+            }
+
+            var sourceWindow = NativeMethods.GetForegroundWindow();
+            if (sourceWindow == IntPtr.Zero || IsOwnWindow(sourceWindow))
+            {
+                return;
+            }
+
+            _selectionSourceWindow = sourceWindow;
+            _selectionPoint = point;
+            _selectionGeneration = Volatile.Read(ref _captureGeneration);
+            ScheduleSelectionDetected(_selectionGeneration);
+        }
+
+        private void ScheduleSelectionCanceled()
         {
             if (_dispatcher.IsDisposed)
             {
                 return;
             }
 
-            Interlocked.Increment(ref _captureGeneration);
             try
             {
                 _dispatcher.BeginInvoke((MethodInvoker)delegate
                 {
-                    _captureTimer.Stop();
-                    _captureTimer.Start();
+                    _selectionTimer.Stop();
+                    var handler = SelectionCanceled;
+                    if (handler != null)
+                    {
+                        handler(this, EventArgs.Empty);
+                    }
                 });
             }
             catch (InvalidOperationException)
@@ -160,312 +191,150 @@ namespace TranslationByLocalAI
             }
         }
 
-        private void CaptureTimerTick(object sender, EventArgs e)
+        private void ScheduleSelectionDetected(int generation)
         {
-            _captureTimer.Stop();
-            if (!Enabled || IsOwnWindow(_sourceWindow))
+            if (_dispatcher.IsDisposed)
             {
                 return;
             }
 
-            var generation = Volatile.Read(ref _captureGeneration);
-            var sourceWindow = _sourceWindow;
-            var mouseUpPoint = _mouseUpPoint;
+            try
+            {
+                _dispatcher.BeginInvoke((MethodInvoker)delegate
+                {
+                    if (!IsCurrentCapture(generation))
+                    {
+                        return;
+                    }
+                    _selectionTimer.Stop();
+                    _selectionTimer.Start();
+                });
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        private void SelectionTimerTick(object sender, EventArgs e)
+        {
+            _selectionTimer.Stop();
+            var generation = Volatile.Read(ref _selectionGeneration);
+            if (!Enabled || !IsCurrentCapture(generation))
+            {
+                return;
+            }
+
+            var handler = SelectionDetected;
+            if (handler != null)
+            {
+                AppLogger.Write("Selection gesture detected; showing translation button.");
+                handler(this, new SelectionDetectedEventArgs(_selectionPoint));
+            }
+        }
+
+        internal Task<string> CaptureSelectionAsync()
+        {
+            var generation = Volatile.Read(ref _selectionGeneration);
+            if (_disposed
+                || !Enabled
+                || generation != Volatile.Read(ref _captureGeneration))
+            {
+                return Task.FromResult<string>(null);
+            }
+
+            var sourceWindow = _selectionSourceWindow;
+            var completion = new TaskCompletionSource<string>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
             var worker = new Thread((ThreadStart)delegate
             {
-                CaptureSelectionOnWorker(generation, sourceWindow, mouseUpPoint);
+                try
+                {
+                    completion.TrySetResult(
+                        CaptureSelectionOnWorker(generation, sourceWindow));
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Write("Selection capture failed: " + ex);
+                    completion.TrySetResult(null);
+                }
             });
             worker.IsBackground = true;
             worker.Name = "TranslationByLocalAI.SelectionCapture";
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
+            return completion.Task;
         }
 
-        private void CaptureSelectionOnWorker(
-            int generation,
-            IntPtr sourceWindow,
-            Point mouseUpPoint)
+        private string CaptureSelectionOnWorker(int generation, IntPtr sourceWindow)
         {
-            var text = TryCaptureSelectionViaAutomation(sourceWindow, mouseUpPoint);
-            if (!string.IsNullOrWhiteSpace(text))
+            if (!IsCurrentCapture(generation)
+                || sourceWindow == IntPtr.Zero
+                || NativeMethods.GetForegroundWindow() != sourceWindow)
             {
-                AppLogger.Write("Selection read through UI Automation.");
+                AppLogger.Write(
+                    "Selection capture skipped because the source window is no longer active.");
+                return null;
             }
-            else if (IsCurrentCapture(generation))
-            {
-                text = CaptureSelectionFromForeground(
-                    sourceWindow,
-                    delegate { return IsCurrentCapture(generation); });
-            }
+
+            var text = CaptureSelectionFromForeground(
+                sourceWindow,
+                delegate { return IsCurrentCapture(generation); });
             if (string.IsNullOrWhiteSpace(text))
             {
                 if (IsCurrentCapture(generation))
                 {
                     AppLogger.Write("Selection capture returned no text.");
                 }
-                return;
+                return null;
             }
 
             text = text.Trim();
-            if (text.Length > 12000)
+            if (text.Length > MaximumSelectionLength)
             {
-                text = text.Substring(0, 12000);
+                text = text.Substring(0, MaximumSelectionLength);
             }
-
-            if (!IsCurrentCapture(generation) || _dispatcher.IsDisposed)
-            {
-                return;
-            }
-
-            try
-            {
-                _dispatcher.BeginInvoke((MethodInvoker)delegate
-                {
-                    if (!IsCurrentCapture(generation) || !Enabled)
-                    {
-                        return;
-                    }
-
-                    var handler = TextSelected;
-                    if (handler != null)
-                    {
-                        AppLogger.Write("Selection captured, length=" + text.Length + ".");
-                        handler(this, new TextSelectedEventArgs(text, mouseUpPoint));
-                    }
-                });
-            }
-            catch (InvalidOperationException)
-            {
-            }
+            AppLogger.Write("Selection captured on request, length=" + text.Length + ".");
+            return IsCurrentCapture(generation) ? text : null;
         }
 
         private bool IsCurrentCapture(int generation)
         {
-            return !_disposed && generation == Volatile.Read(ref _captureGeneration);
+            return !_disposed
+                && generation == Volatile.Read(ref _captureGeneration);
         }
 
         private static string CaptureSelectionFromForeground(
             IntPtr sourceWindow,
             Func<bool> isCurrent)
         {
-            IDataObject original = null;
-            string originalText = null;
-            try
-            {
-                if (!isCurrent())
-                {
-                    return null;
-                }
-
-                original = TryGetClipboardDataObject();
-                if (original != null && original.GetDataPresent(DataFormats.UnicodeText))
-                {
-                    originalText = original.GetData(DataFormats.UnicodeText) as string;
-                }
-
-                if (!TryClearClipboard())
-                {
-                    AppLogger.Write("Clipboard could not be cleared.");
-                    return null;
-                }
-
-                if (!isCurrent())
-                {
-                    return null;
-                }
-
-                var sequence = NativeMethods.GetClipboardSequenceNumber();
-                NativeMethods.SetForegroundWindow(sourceWindow);
-                Thread.Sleep(35);
-                var sentInputs = NativeMethods.SendCtrlC();
-                AppLogger.Write(
-                    "Copy shortcut sent, inputs="
-                    + sentInputs
-                    + ", nativeInputSize="
-                    + Marshal.SizeOf(typeof(NativeMethods.INPUT))
-                    + ".");
-
-                var selected = WaitForClipboardText(650, isCurrent);
-                if (selected != null)
-                {
-                    AppLogger.Write(
-                        "Clipboard selection captured after SendInput, sequenceChanged="
-                        + (NativeMethods.GetClipboardSequenceNumber() != sequence)
-                        + ".");
-                    return selected;
-                }
-
-                if (!isCurrent())
-                {
-                    return null;
-                }
-
-                try
-                {
-                    NativeMethods.SetForegroundWindow(sourceWindow);
-                    SendKeys.SendWait("^c");
-                    AppLogger.Write("Copy shortcut retried with SendKeys.");
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Write("SendKeys copy failed: " + ex.GetType().Name + ".");
-                }
-                return WaitForClipboardText(850, isCurrent);
-            }
-            finally
-            {
-                RestoreClipboard(original, originalText);
-            }
-        }
-
-        private static string TryCaptureSelectionViaAutomation(IntPtr sourceWindow, Point mousePoint)
-        {
-            try
-            {
-                uint sourceProcessId;
-                NativeMethods.GetWindowThreadProcessId(sourceWindow, out sourceProcessId);
-                if (sourceProcessId == 0)
-                {
-                    return null;
-                }
-
-                var focused = AutomationElement.FocusedElement;
-                var text = TryElementAndAncestors(focused);
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    return text;
-                }
-
-                AutomationElement atPointer = null;
-                try
-                {
-                    atPointer = AutomationElement.FromPoint(
-                        new System.Windows.Point(mousePoint.X, mousePoint.Y));
-                }
-                catch
-                {
-                }
-                text = TryElementAndAncestors(atPointer);
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    return text;
-                }
-
-                var root = AutomationElement.FromHandle(sourceWindow);
-                text = TryGetSelectionText(root);
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    return text;
-                }
-
-                var condition = new PropertyCondition(
-                    AutomationElement.IsTextPatternAvailableProperty,
-                    true);
-                var textElements = root.FindAll(TreeScope.Descendants, condition);
-                var count = Math.Min(textElements.Count, 400);
-                for (var index = 0; index < count; index++)
-                {
-                    text = TryGetSelectionText(textElements[index]);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        AppLogger.Write("Selection found by searching the source window automation tree.");
-                        return text;
-                    }
-                }
-                return null;
-            }
-            catch (ElementNotAvailableException)
-            {
-                return null;
-            }
-            catch (InvalidOperationException)
-            {
-                return null;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return null;
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Write("UI Automation selection search failed: " + ex.GetType().Name + ".");
-                return null;
-            }
-        }
-
-        private static string TryElementAndAncestors(AutomationElement element)
-        {
-            var current = element;
-            for (var depth = 0; current != null && depth < 14; depth++)
-            {
-                var text = TryGetSelectionText(current);
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    return text;
-                }
-
-                try
-                {
-                    current = TreeWalker.RawViewWalker.GetParent(current);
-                }
-                catch
-                {
-                    break;
-                }
-            }
-            return null;
-        }
-
-        private static string TryGetSelectionText(AutomationElement element)
-        {
-            if (element == null)
+            if (!isCurrent()
+                || NativeMethods.GetForegroundWindow() != sourceWindow)
             {
                 return null;
             }
 
-            try
-            {
-                object patternObject;
-                if (!element.TryGetCurrentPattern(TextPattern.Pattern, out patternObject))
-                {
-                    return null;
-                }
+            var originalSequence = NativeMethods.GetClipboardSequenceNumber();
+            var sentInputs = NativeMethods.SendCtrlC();
+            AppLogger.Write(
+                "Copy shortcut sent, inputs="
+                + sentInputs
+                + ", nativeInputSize="
+                + Marshal.SizeOf(typeof(NativeMethods.INPUT))
+                + ".");
 
-                var pattern = patternObject as TextPattern;
-                if (pattern == null)
-                {
-                    return null;
-                }
-
-                var ranges = pattern.GetSelection();
-                if (ranges == null || ranges.Length == 0)
-                {
-                    return null;
-                }
-
-                var result = string.Empty;
-                foreach (var range in ranges)
-                {
-                    var part = range.GetText(-1);
-                    if (string.IsNullOrEmpty(part))
-                    {
-                        continue;
-                    }
-                    if (result.Length > 0)
-                    {
-                        result += Environment.NewLine;
-                    }
-                    result += part;
-                }
-                return result;
-            }
-            catch
+            if (sentInputs == 0)
             {
                 return null;
             }
+
+            return WaitForClipboardText(
+                originalSequence,
+                ClipboardTimeoutMilliseconds,
+                isCurrent);
         }
 
         private static string WaitForClipboardText(
+            uint originalSequence,
             int timeoutMilliseconds,
             Func<bool> isCurrent)
         {
@@ -476,9 +345,15 @@ namespace TranslationByLocalAI
                 {
                     return null;
                 }
-                Thread.Sleep(25);
-                var selected = TryGetClipboardText();
-                if (selected != null)
+
+                Thread.Sleep(15);
+                if (NativeMethods.GetClipboardSequenceNumber() == originalSequence)
+                {
+                    continue;
+                }
+
+                string selected;
+                if (TryGetClipboardText(out selected))
                 {
                     return selected;
                 }
@@ -486,112 +361,75 @@ namespace TranslationByLocalAI
             return null;
         }
 
-        private static IDataObject TryGetClipboardDataObject()
+        private static bool TryGetClipboardText(out string text)
         {
-            for (var attempt = 0; attempt < 5; attempt++)
+            text = null;
+            for (var attempt = 0; attempt < 3; attempt++)
             {
+                if (!NativeMethods.OpenClipboard(IntPtr.Zero))
+                {
+                    Thread.Sleep(10);
+                    continue;
+                }
+
+                IntPtr memory = IntPtr.Zero;
+                IntPtr pointer = IntPtr.Zero;
                 try
                 {
-                    var source = Clipboard.GetDataObject();
-                    if (source == null)
+                    if (!NativeMethods.IsClipboardFormatAvailable(
+                        NativeMethods.CF_UNICODETEXT))
                     {
-                        return null;
+                        return false;
                     }
 
-                    var snapshot = new DataObject();
-                    foreach (var format in source.GetFormats(false))
+                    memory = NativeMethods.GetClipboardData(
+                        NativeMethods.CF_UNICODETEXT);
+                    if (memory == IntPtr.Zero)
                     {
-                        try
-                        {
-                            var value = source.GetData(format, false);
-                            if (value != null)
-                            {
-                                snapshot.SetData(format, false, value);
-                            }
-                        }
-                        catch
-                        {
-                        }
+                        return false;
                     }
-                    return snapshot;
-                }
-                catch (ExternalException)
-                {
-                    Thread.Sleep(15);
-                }
-            }
-            return null;
-        }
 
-        private static bool TryClearClipboard()
-        {
-            for (var attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    Clipboard.Clear();
+                    pointer = NativeMethods.GlobalLock(memory);
+                    if (pointer == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    var byteCount = NativeMethods.GlobalSize(memory).ToUInt64();
+                    var characterCount = (int)Math.Min(
+                        byteCount / sizeof(char),
+                        (ulong)MaximumSelectionLength + 1UL);
+                    if (characterCount <= 0)
+                    {
+                        return false;
+                    }
+
+                    text = Marshal.PtrToStringUni(pointer, characterCount);
+                    if (text == null)
+                    {
+                        return false;
+                    }
+
+                    var terminator = text.IndexOf('\0');
+                    if (terminator >= 0)
+                    {
+                        text = text.Substring(0, terminator);
+                    }
                     return true;
                 }
-                catch (ExternalException)
+                finally
                 {
-                    Thread.Sleep(15);
+                    if (pointer != IntPtr.Zero)
+                    {
+                        NativeMethods.GlobalUnlock(memory);
+                    }
+                    NativeMethods.CloseClipboard();
                 }
             }
             return false;
         }
 
-        private static string TryGetClipboardText()
-        {
-            for (var attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (Clipboard.ContainsText(TextDataFormat.UnicodeText))
-                    {
-                        return Clipboard.GetText(TextDataFormat.UnicodeText);
-                    }
-                    if (Clipboard.ContainsText())
-                    {
-                        return Clipboard.GetText();
-                    }
-                    return null;
-                }
-                catch (ExternalException)
-                {
-                    Thread.Sleep(15);
-                }
-            }
-            return null;
-        }
-
-        private static void RestoreClipboard(IDataObject original, string originalText)
-        {
-            for (var attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (original != null)
-                    {
-                        Clipboard.SetDataObject(original, true);
-                    }
-                    else if (originalText != null)
-                    {
-                        Clipboard.SetText(originalText);
-                    }
-                    else
-                    {
-                        Clipboard.Clear();
-                    }
-                    return;
-                }
-                catch
-                {
-                    Thread.Sleep(15);
-                }
-            }
-        }
-
-        private static bool IsOwnWindow(IntPtr window)
+        private bool IsOwnWindow(IntPtr window)
         {
             if (window == IntPtr.Zero)
             {
@@ -599,7 +437,7 @@ namespace TranslationByLocalAI
             }
             uint processId;
             NativeMethods.GetWindowThreadProcessId(window, out processId);
-            return processId == (uint)Process.GetCurrentProcess().Id;
+            return processId == _processId;
         }
 
         public void Dispose()
@@ -610,7 +448,7 @@ namespace TranslationByLocalAI
             }
             _disposed = true;
             Interlocked.Increment(ref _captureGeneration);
-            _captureTimer.Dispose();
+            _selectionTimer.Dispose();
             if (_hook != IntPtr.Zero)
             {
                 NativeMethods.UnhookWindowsHookEx(_hook);
