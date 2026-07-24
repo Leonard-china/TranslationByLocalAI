@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "1.0.1",
     [string]$LlamaDirectory = "D:\Project\Github\LocalAI\llama\llama-b10092-bin-win-cuda-12.4-x64",
     [string]$ModelsDirectory = "",
     [string]$OutputRoot = ""
