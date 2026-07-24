@@ -33,7 +33,7 @@ GitHub 要求单个 Release 附件小于 2 GiB，所以 MiniCPM5-1B 和 Qwen3-4B
 ## 安装发布版
 
 1. 从 [Releases](https://github.com/Leonard-china/TranslationByLocalAI/releases)
-   下载 `TranslationByLocalAI-v1.0.0-win-x64-cuda.zip`。
+   下载 `TranslationByLocalAI-v1.0.1-win-x64-cuda.zip`。
 2. 解压到普通文件夹，不要直接在 ZIP 中运行。
 3. 下载所需模型的所有 GGUF 附件，放入解压目录内的 `Models` 文件夹。
 4. 双击 `TranslationByLocalAI.exe`。
