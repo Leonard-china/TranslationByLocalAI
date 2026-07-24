@@ -1,0 +1,9 @@
+bin/
+dist/
+release/
+*.gguf
+*.zip
+*.user
+*.suo
+*.pdb
+*.log
