@@ -1,7 +1,7 @@
 # TranslationByLocalAI
 
-一款 Windows 本地 AI 即时翻译工具。它通过 `llama.cpp` 在本机运行 GGUF
-模型，翻译文本不会发送到云端。
+一款 Windows AI 即时翻译工具。默认通过 `llama.cpp` 在本机运行 GGUF
+模型；英文学习模式也可选择 DeepSeek V4，以获得更稳定的词汇与语法解析。
 
 ![即时翻译窗口](docs/instant-translation.png)
 
@@ -12,9 +12,31 @@
 - 停止输入约 600 毫秒后自动翻译，无需点击“翻译”按钮。
 - 继续输入时取消旧请求，避免旧结果覆盖新文本。
 - 自动判断中外文方向，也可手动选择 11 种目标语言。
+- 可在设置中开启“英文详细翻译”，并在下次启动时沿用该状态。
+- 详细翻译可使用智能混合、DeepSeek V4 Flash、V4 Pro 或本地模型；DeepSeek 密钥使用
+  Windows DPAPI 按当前用户加密保存。
+- 详细模式下，单词显示音标、词性、完整常用释义、变形、短语、例句和相关词汇。
+- 英文单句只显示自然翻译、句子主干、时态语态、从句和关键语法；多句或段落仍仅翻译。
 - 自动启动和关闭本机 `llama-server`，支持在设置中切换 GGUF 模型。
 - 划选时不读取或改写剪贴板；只有点击翻译按钮后，才会复制选区。
 - 点击翻译按钮后，选中文字会保留在剪贴板中，不会再被程序恢复成旧内容。
+
+## 英文详细翻译
+
+在托盘菜单中打开“设置…”，勾选“开启英文详细翻译”即可。该功能只影响
+英文翻译为简体中文，其他翻译方向保持原来的快速翻译方式。
+
+默认处理引擎为“智能混合”：单词先瞬间显示 ECDICT 本地词典内容，再由
+`DeepSeek V4 Flash` 补充短语和例句。也可切换到 `DeepSeek V4 Pro` 优先保证
+完整度，或选择“本地词典 + 本地 AI”保持完全离线。使用云端处理时需要在设置
+中填写 API 密钥。
+
+![英文单词详细翻译](docs/detailed-translation-preview.png)
+
+输入类型会优先在本机用轻量规则判断，不会为明确的单词、单句或多句额外发起
+一次 AI 分类请求。短语与无标点短句由同一次翻译请求判断，因此详细模式通常
+仍只调用模型一次。结构化内容无法解析时，界面会直接保留模型原始输出，不会
+自动重试拖慢翻译。
 
 ## 发布版包含的模型
 
@@ -67,6 +89,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
 构建产物位于 `dist\TranslationByLocalAI.exe`。
 
+运行输入分类和结构化解析测试：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
+```
+
 制作 GitHub 发布附件：
 
 ```powershell
@@ -78,7 +106,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package-release.ps1
 
 ## 隐私与限制
 
-- 翻译请求只发送到设置中的 API 地址；默认地址是 `127.0.0.1`。
+- 普通翻译和“本地模型”详细翻译只发送到设置中的本机 API 地址；默认地址是
+  `127.0.0.1`。
+- 选择 DeepSeek 作为英语学习模式的处理引擎后，英文原文会发送到
+  `api.deepseek.com`；其他翻译方向仍使用本地模型。
+- DeepSeek API 密钥不会以明文写入配置文件，而是使用 Windows DPAPI 按当前
+  用户加密。请不要分享密钥或将配置文件复制给其他用户。
 - 仅做划选动作不会读取选区或模拟 `Ctrl+C`，不应影响其他软件的复制粘贴。
 - 密码框、禁止复制的控件、受保护的 PDF/网页可能无法读取选中文本。
 - 对以管理员权限运行的程序划词时，本工具通常也需要相同权限。

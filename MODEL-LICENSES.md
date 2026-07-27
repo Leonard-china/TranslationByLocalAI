@@ -12,6 +12,8 @@
 发布版还包含：
 
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)，MIT License。
+- [ECDICT](https://github.com/skywind3000/ECDICT) 的精简离线词典数据，
+  MIT License；完整许可文本随程序放在 `licenses/ECDICT-MIT.txt`。
 - NVIDIA CUDA 运行时可再发行组件；其使用受
   [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/) 约束。
 

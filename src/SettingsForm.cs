@@ -17,6 +17,10 @@ namespace TranslationByLocalAI
         private readonly NumericUpDown _timeoutBox;
         private readonly ComboBox _chineseTargetBox;
         private readonly ComboBox _foreignTargetBox;
+        private readonly CheckBox _detailedEnglishBox;
+        private readonly ComboBox _detailedProviderBox;
+        private readonly TextBox _deepSeekKeyBox;
+        private readonly Label _providerHintLabel;
 
         internal SettingsForm(AppConfig config, Icon appIcon)
         {
@@ -26,13 +30,13 @@ namespace TranslationByLocalAI
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(690, 550);
+            ClientSize = new Size(720, 665);
             BackColor = UiTheme.Background;
             Font = UiTheme.Font(9.5f, FontStyle.Regular);
 
             var root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
-            root.Padding = new Padding(24, 20, 24, 18);
+            root.Padding = new Padding(24, 16, 24, 14);
             root.ColumnCount = 1;
             root.RowCount = 4;
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -46,7 +50,7 @@ namespace TranslationByLocalAI
             title.AutoSize = true;
             title.Font = UiTheme.Font(16f, FontStyle.Bold);
             title.ForeColor = UiTheme.Text;
-            title.Margin = new Padding(0, 0, 0, 16);
+            title.Margin = new Padding(0, 0, 0, 12);
             root.Controls.Add(title, 0, 0);
 
             var table = new TableLayoutPanel();
@@ -58,7 +62,9 @@ namespace TranslationByLocalAI
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72f));
             for (var row = 0; row < table.RowCount; row++)
             {
-                table.RowStyles.Add(new RowStyle(SizeType.Absolute, row == 7 ? 54f : 43f));
+                table.RowStyles.Add(new RowStyle(
+                    SizeType.Absolute,
+                    row == 7 ? 54f : (row == 8 ? 145f : 43f)));
             }
             root.Controls.Add(table, 0, 1);
 
@@ -133,6 +139,67 @@ namespace TranslationByLocalAI
             table.Controls.Add(checks, 1, 7);
             table.SetColumnSpan(checks, 2);
 
+            AddLabel(table, "英语学习模式", 8);
+            var detailedPanel = new TableLayoutPanel();
+            detailedPanel.Dock = DockStyle.Fill;
+            detailedPanel.ColumnCount = 2;
+            detailedPanel.RowCount = 4;
+            detailedPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86f));
+            detailedPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            detailedPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
+            detailedPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 37f));
+            detailedPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 37f));
+            detailedPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            detailedPanel.Margin = new Padding(0, 5, 0, 0);
+
+            _detailedEnglishBox = new CheckBox();
+            _detailedEnglishBox.Text = "开启英文详细翻译";
+            _detailedEnglishBox.AutoSize = true;
+            _detailedEnglishBox.Checked = config.DetailedEnglishEnabled;
+            _detailedEnglishBox.Font = UiTheme.Font(9.5f, FontStyle.Bold);
+            _detailedEnglishBox.Margin = new Padding(0, 2, 0, 0);
+            detailedPanel.Controls.Add(_detailedEnglishBox, 0, 0);
+            detailedPanel.SetColumnSpan(_detailedEnglishBox, 2);
+
+            var providerLabel = CreateInlineLabel("处理引擎");
+            detailedPanel.Controls.Add(providerLabel, 0, 1);
+            _detailedProviderBox = new ComboBox();
+            _detailedProviderBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            _detailedProviderBox.Dock = DockStyle.Fill;
+            _detailedProviderBox.Margin = new Padding(0, 4, 0, 4);
+            _detailedProviderBox.Items.AddRange(new object[]
+            {
+                new ProviderOption("智能混合（推荐：先显示本地结果）", "Hybrid"),
+                new ProviderOption("DeepSeek V4 Pro（推荐：完整学习）", "DeepSeekPro"),
+                new ProviderOption("DeepSeek V4 Flash（速度优先）", "DeepSeekFlash"),
+                new ProviderOption("本地词典 + 本地 AI（完全离线）", "Local")
+            });
+            SelectProvider(_detailedProviderBox, config.DetailedTranslationProvider);
+            detailedPanel.Controls.Add(_detailedProviderBox, 1, 1);
+
+            var keyLabel = CreateInlineLabel("API 密钥");
+            detailedPanel.Controls.Add(keyLabel, 0, 2);
+            _deepSeekKeyBox = new TextBox();
+            _deepSeekKeyBox.Dock = DockStyle.Fill;
+            _deepSeekKeyBox.Margin = new Padding(0, 5, 0, 5);
+            _deepSeekKeyBox.Font = UiTheme.Font(9f, FontStyle.Regular);
+            _deepSeekKeyBox.UseSystemPasswordChar = true;
+            _deepSeekKeyBox.Text = config.GetDeepSeekApiKey();
+            detailedPanel.Controls.Add(_deepSeekKeyBox, 1, 2);
+
+            _providerHintLabel = new Label();
+            _providerHintLabel.AutoSize = true;
+            _providerHintLabel.MaximumSize = new Size(475, 0);
+            _providerHintLabel.ForeColor = UiTheme.Muted;
+            _providerHintLabel.Margin = new Padding(0, 5, 0, 0);
+            detailedPanel.Controls.Add(_providerHintLabel, 0, 3);
+            detailedPanel.SetColumnSpan(_providerHintLabel, 2);
+
+            _detailedProviderBox.SelectedIndexChanged += delegate { UpdateDeepSeekControls(); };
+            UpdateDeepSeekControls();
+            table.Controls.Add(detailedPanel, 1, 8);
+            table.SetColumnSpan(detailedPanel, 2);
+
             var configHint = new Label();
             configHint.Text = "配置保存在：" + AppConfig.ConfigPath;
             configHint.AutoSize = true;
@@ -175,6 +242,12 @@ namespace TranslationByLocalAI
             config.ButtonTimeoutSeconds = (int)_timeoutBox.Value;
             config.TargetForChinese = Convert.ToString(_chineseTargetBox.SelectedItem);
             config.TargetForForeign = Convert.ToString(_foreignTargetBox.SelectedItem);
+            config.DetailedEnglishEnabled = _detailedEnglishBox.Checked;
+            var provider = _detailedProviderBox.SelectedItem as ProviderOption;
+            config.DetailedTranslationProvider = provider == null
+                ? "Hybrid"
+                : provider.Value;
+            config.SetDeepSeekApiKey(_deepSeekKeyBox.Text);
         }
 
         private void SaveClicked(object sender, EventArgs e)
@@ -198,6 +271,22 @@ namespace TranslationByLocalAI
             {
                 MessageBox.Show(this, "找不到 GGUF 模型文件。", "设置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _modelBox.Focus();
+                return;
+            }
+
+            var selectedProvider = _detailedProviderBox.SelectedItem as ProviderOption;
+            if (_detailedEnglishBox.Checked
+                && selectedProvider != null
+                && !string.Equals(selectedProvider.Value, "Local", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(_deepSeekKeyBox.Text))
+            {
+                MessageBox.Show(
+                    this,
+                    "使用 DeepSeek 详细翻译前，请输入 API 密钥；也可以改选“本地模型”。",
+                    "设置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                _deepSeekKeyBox.Focus();
                 return;
             }
 
@@ -334,6 +423,61 @@ namespace TranslationByLocalAI
             table.Controls.Add(label, 0, row);
         }
 
+        private static Label CreateInlineLabel(string text)
+        {
+            var label = new Label();
+            label.Text = text;
+            label.AutoSize = true;
+            label.ForeColor = UiTheme.Text;
+            label.Margin = new Padding(0, 9, 8, 0);
+            return label;
+        }
+
+        private void UpdateDeepSeekControls()
+        {
+            var provider = _detailedProviderBox.SelectedItem as ProviderOption;
+            var value = provider == null ? "Hybrid" : provider.Value;
+            _deepSeekKeyBox.Enabled = !string.Equals(
+                value,
+                "Local",
+                StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(value, "Local", StringComparison.OrdinalIgnoreCase))
+            {
+                _providerHintLabel.Text =
+                    "完全离线：单词先查本地词典，再由本地 AI 补充；不会发送任何文本或密钥。";
+            }
+            else if (string.Equals(value, "Hybrid", StringComparison.OrdinalIgnoreCase))
+            {
+                _providerHintLabel.Text =
+                    "单词会立即显示本地词典结果，再由 V4 Flash 补充；密钥由 Windows 当前用户加密保存。";
+            }
+            else if (string.Equals(value, "DeepSeekFlash", StringComparison.OrdinalIgnoreCase))
+            {
+                _providerHintLabel.Text =
+                    "速度优先：使用 V4 Flash；单词仍会先显示本地词典结果。";
+            }
+            else
+            {
+                _providerHintLabel.Text =
+                    "完整度优先：使用 V4 Pro；单词仍会先显示本地词典结果。";
+            }
+        }
+
+        private static void SelectProvider(ComboBox combo, string value)
+        {
+            for (var index = 0; index < combo.Items.Count; index++)
+            {
+                var option = combo.Items[index] as ProviderOption;
+                if (option != null
+                    && string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedIndex = index;
+                    return;
+                }
+            }
+            combo.SelectedIndex = 0;
+        }
+
         private Button CreateBrowseButton(TextBox target, string filter)
         {
             var button = UiTheme.CreateSecondaryButton("浏览");
@@ -445,6 +589,23 @@ namespace TranslationByLocalAI
                 {
                     return fileName + "  (文件不存在)";
                 }
+            }
+        }
+
+        private sealed class ProviderOption
+        {
+            internal ProviderOption(string displayName, string value)
+            {
+                DisplayName = displayName;
+                Value = value;
+            }
+
+            internal string DisplayName { get; private set; }
+            internal string Value { get; private set; }
+
+            public override string ToString()
+            {
+                return DisplayName;
             }
         }
     }
