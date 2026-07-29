@@ -49,11 +49,15 @@ New-Item -ItemType Directory -Path $portableModelsDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableDirectory "licenses") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableDirectory "Dictionaries") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $portableDirectory "Articles") -Force | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $projectRoot "dist\TranslationByLocalAI.exe") -Destination $portableDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot "dist\Dictionaries\ecdict-learning.tsv.gz") `
     -Destination (Join-Path $portableDirectory "Dictionaries")
+Copy-Item -LiteralPath (Join-Path $projectRoot "dist\Articles\offline-articles.json.gz") `
+    -Destination (Join-Path $portableDirectory "Articles")
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $portableDirectory
+Copy-Item -LiteralPath (Join-Path $projectRoot "ARTICLE-SOURCES.md") -Destination $portableDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot "MODEL-LICENSES.md") -Destination $portableDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\Apache-2.0.txt") -Destination (Join-Path $portableDirectory "licenses")
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\ECDICT-MIT.txt") -Destination (Join-Path $portableDirectory "licenses")

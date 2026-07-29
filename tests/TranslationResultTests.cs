@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using TranslationByLocalAI;
 
@@ -83,6 +86,8 @@ namespace TranslationByLocalAITests
             AssertInvalidParsing();
             AssertApiKeyProtection();
             AssertOfflineDictionary();
+            AssertOfflineArticleLibrary();
+            AssertOfflineArticleHtmlExport();
 
             Console.WriteLine(
                 _failures == 0
@@ -435,6 +440,135 @@ namespace TranslationByLocalAITests
             Assert(
                 actual == expected,
                 "Expected " + expected + " for \"" + text + "\", got " + actual + ".");
+        }
+
+        private static void AssertOfflineArticleLibrary()
+        {
+            var articles = OfflineArticleRepository.GetArticles();
+            Assert(articles.Count == 200, "The offline library should contain 200 articles.");
+
+            var voaCount = 0;
+            var natureCount = 0;
+            var words = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var wordPattern = new Regex(@"[A-Za-z]+(?:['’\-][A-Za-z]+)*");
+            foreach (var article in articles)
+            {
+                Assert(
+                    !string.IsNullOrWhiteSpace(article.Title)
+                    && !string.IsNullOrWhiteSpace(article.Content)
+                    && !string.IsNullOrWhiteSpace(article.Html)
+                    && article.Html.IndexOf("<p", StringComparison.OrdinalIgnoreCase) >= 0
+                    && article.WordCount >= 100,
+                    "Every offline article should have usable metadata and HTML content.");
+                if (string.Equals(
+                    article.Source,
+                    "VOA Learning English",
+                    StringComparison.Ordinal))
+                {
+                    voaCount++;
+                    var lower = article.Content.ToLowerInvariant();
+                    Assert(
+                        lower.IndexOf("associated press", StringComparison.Ordinal) < 0
+                        && lower.IndexOf("reuters", StringComparison.Ordinal) < 0
+                        && lower.IndexOf("agence france-presse", StringComparison.Ordinal) < 0,
+                        "VOA offline text must exclude wire-service material.");
+                }
+                else if (string.Equals(
+                    article.Source,
+                    "Nature Portfolio",
+                    StringComparison.Ordinal))
+                {
+                    natureCount++;
+                    Assert(
+                        article.License.IndexOf(
+                            "Open access",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                        "Nature readings must retain an open-access license.");
+                }
+
+                foreach (Match match in wordPattern.Matches(
+                    article.Title + "\n" + article.Content))
+                {
+                    words.Add(match.Value);
+                }
+            }
+
+            Assert(voaCount == 188, "The library should contain 188 VOA originals.");
+            Assert(natureCount == 12, "The library should contain 12 Nature readings.");
+            foreach (var word in words)
+            {
+                Assert(
+                    OfflineEnglishDictionary.CreatePreview(word) != null,
+                    "Article word missing from local dictionary: " + word);
+            }
+        }
+
+        private static void AssertOfflineArticleHtmlExport()
+        {
+            var article = new OfflineArticle
+            {
+                Id = "sample:article/1",
+                Title = "A < B & \"C\"",
+                Source = "Offline source",
+                Section = "Learning",
+                Topic = "HTML",
+                Difficulty = "基础",
+                LengthBand = "短篇",
+                WordCount = 2,
+                PublishedDate = "2026-07-29",
+                Author = "Test Author",
+                Url = "https://example.com/source?a=1&b=2",
+                License = "Open access",
+                LicenseUrl = "javascript:alert(1)",
+                Html = "<p>Hello <strong>world</strong>.</p>"
+            };
+
+            var html = OfflineArticleHtmlExporter.BuildDocument(article);
+            Assert(
+                html.StartsWith("<!doctype html>", StringComparison.OrdinalIgnoreCase)
+                    && html.Contains("<meta charset=\"utf-8\">"),
+                "Exported articles should be complete UTF-8 HTML documents.");
+            Assert(
+                html.Contains("<title>A &lt; B &amp; &quot;C&quot;</title>")
+                    && html.Contains(article.Html),
+                "HTML export should encode metadata while preserving article markup.");
+            Assert(
+                html.Contains("https://example.com/source?a=1&amp;b=2")
+                    && !html.Contains("javascript:"),
+                "HTML export should retain safe source links and reject unsafe links.");
+
+            var fileName = OfflineArticleHtmlExporter.CreateFileName(article);
+            Assert(
+                fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                    && fileName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0,
+                "Exported article file names should be valid HTML file names.");
+            Assert(
+                OfflineArticleHtmlExporter.CreateFileName(
+                    new OfflineArticle { Title = "CON" })
+                    .StartsWith("article-", StringComparison.OrdinalIgnoreCase),
+                "Reserved Windows file names should be avoided.");
+
+            var testDirectory = Path.Combine(
+                Path.GetTempPath(),
+                "TranslationByLocalAI-HtmlExport-"
+                    + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var path = OfflineArticleHtmlExporter.Save(article, testDirectory);
+                var bytes = File.ReadAllBytes(path);
+                Assert(
+                    File.Exists(path)
+                        && bytes.Length > 0
+                        && bytes[0] == (byte)'<',
+                    "HTML export should save a browser-readable UTF-8 file without a BOM.");
+            }
+            finally
+            {
+                if (Directory.Exists(testDirectory))
+                {
+                    Directory.Delete(testDirectory, true);
+                }
+            }
         }
 
         private static void Assert(bool condition, string message)

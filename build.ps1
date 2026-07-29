@@ -43,4 +43,9 @@ New-Item -ItemType Directory -Path $dictionaryDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "resources\ecdict-learning.tsv.gz") `
     -Destination $dictionaryDirectory -Force
 
+$articleDirectory = Join-Path $outputDirectory "Articles"
+New-Item -ItemType Directory -Path $articleDirectory -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot "resources\offline-articles.json.gz") `
+    -Destination $articleDirectory -Force
+
 Write-Host "Build complete: $outputFile"

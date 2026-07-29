@@ -18,12 +18,15 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\AppLogger.cs" />
+    <Compile Include="src\ArticleReaderForm.cs" />
     <Compile Include="src\AppConfig.cs" />
     <Compile Include="src\AssemblyInfo.cs" />
     <Compile Include="src\DesktopWidgetForm.cs" />
     <Compile Include="src\FloatingButtonForm.cs" />
     <Compile Include="src\NativeMethods.cs" />
     <Compile Include="src\OfflineEnglishDictionary.cs" />
+    <Compile Include="src\OfflineArticleHtmlExporter.cs" />
+    <Compile Include="src\OfflineArticleRepository.cs" />
     <Compile Include="src\Program.cs" />
     <Compile Include="src\SelectionMonitor.cs" />
     <Compile Include="src\SettingsForm.cs" />
@@ -34,6 +37,10 @@
     <Compile Include="src\UiTheme.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="resources\offline-articles.json.gz">
+      <Link>Articles\offline-articles.json.gz</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="resources\ecdict-learning.tsv.gz">
       <Link>Dictionaries\ecdict-learning.tsv.gz</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

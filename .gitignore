@@ -7,3 +7,4 @@ release/
 *.suo
 *.pdb
 *.log
+__pycache__/

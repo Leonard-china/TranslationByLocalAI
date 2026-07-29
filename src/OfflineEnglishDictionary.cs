@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace TranslationByLocalAI
 {
@@ -19,16 +20,59 @@ namespace TranslationByLocalAI
     internal static class OfflineEnglishDictionary
     {
         private static readonly object Sync = new object();
+        private static readonly object PreviewSync = new object();
         private static readonly Regex TranslationPartOfSpeech = new Regex(
             @"^(?<pos>[A-Za-z]+(?:\.[A-Za-z]+)?\.)\s*(?<meaning>.+)$",
             RegexOptions.Compiled);
         private static Dictionary<string, OfflineDictionaryEntry> _entries;
+        private static readonly Dictionary<string, TranslationResult> PreviewCache =
+            new Dictionary<string, TranslationResult>(
+                512,
+                StringComparer.OrdinalIgnoreCase);
         private static bool _loadAttempted;
 
         internal static TranslationResult CreatePreview(string word)
         {
-            var entry = Lookup(word);
-            return entry == null ? null : BuildResult(entry);
+            var normalized = NormalizeWord(word);
+            if (normalized.Length == 0)
+            {
+                return null;
+            }
+
+            TranslationResult cached;
+            lock (PreviewSync)
+            {
+                if (PreviewCache.TryGetValue(normalized, out cached))
+                {
+                    return cached;
+                }
+            }
+
+            var entry = Lookup(normalized);
+            if (entry == null)
+            {
+                return null;
+            }
+            var result = BuildResult(entry);
+            lock (PreviewSync)
+            {
+                PreviewCache[normalized] = result;
+            }
+            return result;
+        }
+
+        internal static void WarmUp()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    EnsureLoaded();
+                }
+                catch
+                {
+                }
+            });
         }
 
         internal static TranslationResult Merge(
@@ -78,7 +122,15 @@ namespace TranslationByLocalAI
             }
 
             OfflineDictionaryEntry entry;
-            return _entries.TryGetValue(word.Trim(), out entry) ? entry : null;
+            var normalized = NormalizeWord(word);
+            return _entries.TryGetValue(normalized, out entry) ? entry : null;
+        }
+
+        private static string NormalizeWord(string word)
+        {
+            return string.IsNullOrWhiteSpace(word)
+                ? string.Empty
+                : word.Trim().Replace('’', '\'');
         }
 
         private static void EnsureLoaded()
@@ -102,6 +154,7 @@ namespace TranslationByLocalAI
                 }
 
                 var loaded = new Dictionary<string, OfflineDictionaryEntry>(
+                    70000,
                     StringComparer.OrdinalIgnoreCase);
                 try
                 {
