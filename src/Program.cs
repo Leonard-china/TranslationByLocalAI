@@ -31,11 +31,26 @@ namespace TranslationByLocalAI
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 AppLogger.Write("Starting application context.");
-                using (var context = new TranslationApplicationContext())
+                var openReader = HasArgument(
+                    Environment.GetCommandLineArgs(),
+                    "--reader");
+                using (var context = new TranslationApplicationContext(openReader))
                 {
                     Application.Run(context);
                 }
             }
+        }
+
+        private static bool HasArgument(string[] args, string expected)
+        {
+            foreach (var value in args)
+            {
+                if (string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

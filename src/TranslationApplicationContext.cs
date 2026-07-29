@@ -12,6 +12,7 @@ namespace TranslationByLocalAI
         private readonly NotifyIcon _trayIcon;
         private readonly ToolStripMenuItem _enabledMenuItem;
         private readonly ToolStripMenuItem _widgetMenuItem;
+        private readonly ToolStripMenuItem _readerMenuItem;
         private readonly FloatingButtonForm _floatingButton;
         private readonly DesktopWidgetForm _desktopWidget;
         private readonly SelectionMonitor _selectionMonitor;
@@ -19,10 +20,16 @@ namespace TranslationByLocalAI
         private readonly CancellationTokenSource _lifetimeCancellation;
         private AppConfig _config;
         private TranslationForm _translationForm;
+        private ArticleReaderForm _articleReaderForm;
         private Point _selectedPoint;
         private bool _disposed;
 
         internal TranslationApplicationContext()
+            : this(false)
+        {
+        }
+
+        internal TranslationApplicationContext(bool openReaderOnLaunch)
         {
             _config = AppConfig.Load();
             AppLogger.Write("Application starting.");
@@ -36,6 +43,8 @@ namespace TranslationByLocalAI
                 + ".");
             _appIcon = UiTheme.CreateAppIcon();
             _translationClient = new TranslationClient(_config);
+            OfflineEnglishDictionary.WarmUp();
+            OfflineArticleRepository.WarmUp();
             _lifetimeCancellation = new CancellationTokenSource();
             _floatingButton = new FloatingButtonForm();
             var unusedHandle = _floatingButton.Handle;
@@ -52,6 +61,9 @@ namespace TranslationByLocalAI
             _widgetMenuItem.CheckOnClick = true;
             _widgetMenuItem.Click += ToggleDesktopWidget;
 
+            _readerMenuItem = new ToolStripMenuItem("离线英语阅读库");
+            _readerMenuItem.Click += delegate { ShowArticleReader(); };
+
             var testItem = new ToolStripMenuItem("测试本地 AI");
             testItem.Click += async delegate { await TestConnectionAsync(); };
             var settingsItem = new ToolStripMenuItem("设置…");
@@ -63,6 +75,7 @@ namespace TranslationByLocalAI
             menu.Font = UiTheme.Font(9f, FontStyle.Regular);
             menu.Items.Add(_enabledMenuItem);
             menu.Items.Add(_widgetMenuItem);
+            menu.Items.Add(_readerMenuItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(testItem);
             menu.Items.Add(settingsItem);
@@ -118,6 +131,10 @@ namespace TranslationByLocalAI
             }
 
             Application.Idle += StartLocalAiOnApplicationIdle;
+            if (openReaderOnLaunch)
+            {
+                ShowArticleReader();
+            }
         }
 
         private void StartLocalAiOnApplicationIdle(object sender, EventArgs e)
@@ -243,6 +260,33 @@ namespace TranslationByLocalAI
             }
         }
 
+        private void ShowArticleReader()
+        {
+            if (_articleReaderForm == null || _articleReaderForm.IsDisposed)
+            {
+                _articleReaderForm = new ArticleReaderForm(_appIcon);
+                _articleReaderForm.SentenceAnalysisRequested +=
+                    ArticleReaderSentenceAnalysisRequested;
+            }
+            if (!_articleReaderForm.Visible)
+            {
+                _articleReaderForm.Show();
+            }
+            else
+            {
+                _articleReaderForm.BringToFront();
+            }
+            _articleReaderForm.Activate();
+        }
+
+        private void ArticleReaderSentenceAnalysisRequested(
+            object sender,
+            SentenceAnalysisRequestedEventArgs e)
+        {
+            EnsureTranslationForm();
+            _translationForm.ShowTranslation(e.Sentence, e.Anchor);
+        }
+
         private void ToggleEnabled(object sender, EventArgs e)
         {
             _config.Enabled = _enabledMenuItem.Checked;
@@ -362,6 +406,12 @@ namespace TranslationByLocalAI
             {
                 _translationForm.ClosePermanently();
                 _translationForm = null;
+            }
+            if (_articleReaderForm != null && !_articleReaderForm.IsDisposed)
+            {
+                _articleReaderForm.Close();
+                _articleReaderForm.Dispose();
+                _articleReaderForm = null;
             }
             _selectionMonitor.Dispose();
             _translationClient.Dispose();
